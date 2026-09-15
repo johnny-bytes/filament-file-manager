@@ -2,14 +2,14 @@
 
 namespace BostjanOb\FilamentFileManager\Pages;
 
+use BackedEnum;
 use BostjanOb\FilamentFileManager\Model\FileItem;
+use Filament\Actions\Action;
+use Filament\Actions\BulkAction;
+use Filament\Actions\DeleteAction;
 use Filament\Forms\Components\FileUpload;
 use Filament\Forms\Components\TextInput;
 use Filament\Pages\Page;
-use Filament\Tables\Actions\Action;
-use Filament\Tables\Actions\BulkAction;
-use Filament\Tables\Actions\DeleteAction;
-use Filament\Tables\Actions\ViewAction;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Concerns\InteractsWithTable;
 use Filament\Tables\Contracts\HasTable;
@@ -23,14 +23,15 @@ use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Number;
 use Livewire\Attributes\Url;
 use Livewire\Component;
+use Livewire\Features\SupportFileUploads\TemporaryUploadedFile;
 
 class FileManager extends Page implements HasTable
 {
     use InteractsWithTable;
 
-    protected static ?string $navigationIcon = 'heroicon-o-folder-open';
+    protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-folder-open';
 
-    protected static string $view = 'filament-file-manager::pages.file-manager';
+    protected string $view = 'filament-file-manager::pages.file-manager';
 
     // Define the disk configuration property
     protected array $diskConfig;
@@ -42,15 +43,9 @@ class FileManager extends Page implements HasTable
 
     protected $listeners = ['updatePath' => '$refresh'];
 
-    // Add a constructor or mount method to initialize the disk config
-    public function __construct()
-    {
-        $this->disk = $this->getOneDriveConfig();
-    }
-
     public function getDisk(): Filesystem
     {
-        return $this->disk;
+        return $this->disk ??= $this->getOneDriveConfig();
     }
 
     // Add session property to store the access token between requests
@@ -95,10 +90,7 @@ class FileManager extends Page implements HasTable
     {
         return $table
             ->heading($this->path ?: 'Root')
-            ->query(
-
-                FileItem::queryForDiskAndPath($this->getDisk(), $this->path)
-            )
+            ->query(fn () => FileItem::queryForDiskAndPath($this->getDisk(), $this->path))
             ->paginated(false)
             ->columns([
                 TextColumn::make('name')
@@ -113,7 +105,7 @@ class FileManager extends Page implements HasTable
                     ->action(function (FileItem $record) {
                         if ($record->isFolder()) {
                             $this->path = $record->path;
-                            $this->dispatch('updatePath');
+                            $this->resetTable();
                         }
                     }),
                 TextColumn::make('dateModified')
@@ -122,17 +114,7 @@ class FileManager extends Page implements HasTable
                     ->formatStateUsing(fn ($state) => $state ? Number::fileSize($state) : ''),
                 TextColumn::make('type'),
             ])
-            ->actions([
-                // ViewAction::make('open')
-                //     ->label('Open')
-                //     ->hidden(fn (FileItem $record): bool => ! $record->canOpen())
-                //     ->url(fn (FileItem $record): string => $this->disk($this->getDiskConfig())->url($record->path))
-                //     ->openUrlInNewTab(),
-                // Action::make('download')
-                //     ->label('Download')
-                //     ->icon('heroicon-o-document-arrow-down')
-                //     ->hidden(fn (FileItem $record): bool => $record->isFolder())
-                //     ->action(fn (FileItem $record) => $this->disk->download($record->path)),
+            ->recordActions([
                 DeleteAction::make('delete')
                     ->successNotificationTitle('File deleted')
                     ->hidden(fn (FileItem $record): bool => $record->isPreviousPath())
@@ -142,7 +124,7 @@ class FileManager extends Page implements HasTable
                         }
                     }),
             ])
-            ->bulkActions([
+            ->toolbarActions([
                 BulkAction::make('delete')
                     ->icon('heroicon-o-trash')
                     ->color('danger')
@@ -159,7 +141,7 @@ class FileManager extends Page implements HasTable
                 Action::make('create_folder')
                     ->label('Create Folder')
                     ->icon('heroicon-o-folder-plus')
-                    ->form([
+                    ->schema([
                         TextInput::make('name')
                             ->label('Folder name')
                             ->placeholder('Folder name')
@@ -167,7 +149,7 @@ class FileManager extends Page implements HasTable
                     ])
                     ->successNotificationTitle('Folder created')
                     ->action(function (array $data, Component $livewire, Action $action): void {
-                        $this->disk
+                        $this->getDisk()
                             ->makeDirectory($livewire->path.'/'.$data['name']);
 
                         $this->resetTable();
@@ -178,32 +160,35 @@ class FileManager extends Page implements HasTable
                     ->label('Upload files')
                     ->icon('heroicon-o-document-arrow-up')
                     ->color('info')
-                    ->form([
+                    ->schema([
                         FileUpload::make('files')
                             ->required()
                             ->multiple()
                             ->previewable(false)
                             ->preserveFilenames()
-                            ->storeFiles(function (FileUpload $component, array $state) {
-                                // $state is the array of uploaded files (temporary objects),
-                                // so you can manually store them using your $this->getDisk().
+                            ->saveUploadedFileUsing(function (TemporaryUploadedFile $file): string {
+                                $path = ltrim($this->path.'/'.$file->getClientOriginalName(), '/');
+                                $stream = fopen($file->getRealPath(), 'rb');
 
-                                // Example:
-                                foreach ($state as $uploadedFile) {
-                                    $filename = $uploadedFile->getClientOriginalName();
-
-                                    // Use your dynamic disk:
-                                    $this->getDisk()->put(
-                                        $this->path.'/'.$filename,
-                                        file_get_contents($uploadedFile->getRealPath())
-                                    );
+                                if ($stream === false) {
+                                    throw new \RuntimeException('Unable to read uploaded file.');
                                 }
 
-                                // Return something if needed (e.g., paths).
-                                return [];
+                                try {
+                                    if (! $this->getDisk()->put($path, $stream)) {
+                                        throw new \RuntimeException('Unable to upload file.');
+                                    }
+                                } finally {
+                                    if (is_resource($stream)) {
+                                        fclose($stream);
+                                    }
+                                }
+
+                                return $path;
                             })
                             ->directory($this->path),
-                    ]),
+                    ])
+                    ->action(fn () => $this->resetTable()),
             ]);
     }
 }

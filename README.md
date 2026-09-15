@@ -1,68 +1,56 @@
 # Filament File Manager
 
-This package provides a Filament page as a simple file manager.
+Version 1.0.0 provides a file manager page for Filament 5 and Laravel 13. Requires PHP 8.3+ and Sushi 2.5.4+.
 
 ## Installation
 
-You can install the package via composer:
-
 ```bash
-composer require bostjanob/filament-file-manager
+composer require bostjanob/filament-file-manager:^1.0
 ```
+
+For the default OneDrive integration, also install `justus/flysystem-onedrive:^1.0` and configure the `onedrive` disk with `driver`, `root`, `directory_type`, `tenant_id`, `client_id`, and `secret`.
 
 ## Usage
 
-Extend the page class and set `$disk` property to the disk you want to manage.
+Extend the page and register it with your Filament panel (or use panel page discovery). The default implementation connects to the configured OneDrive disk. To manage another disk, override `getDisk()`:
 
 ```php
-<?php
-
 namespace App\Filament\Pages;
 
 use BostjanOb\FilamentFileManager\Pages\FileManager;
+use Illuminate\Contracts\Filesystem\Filesystem;
+use Illuminate\Support\Facades\Storage;
 
 class PublicFileManager extends FileManager
 {
     protected static ?string $navigationLabel = 'Public files';
-    
-    protected string $disk = 'public';
+
+    public function getDisk(): Filesystem
+    {
+        return Storage::disk('public');
+    }
 }
 ```
 
-If you want to change default folder, override the `$path` property.
+Override the public string `$path` property to choose an initial folder.
 
-### Customizing actions
+## Upgrading to 1.0
 
-You can customize the actions by overriding the `table` method.
+Upgrade the consuming application to Laravel 13 and Filament 5 first. Page subclasses must use an instance `protected string $view`, and any overridden navigation icon property must use `string|\BackedEnum|null`.
 
-Hiding button:
-```php
-public function table(Table $table): Table
-{
-    $table = parent::table($table);
+Custom actions now use `Filament\Actions` classes, `schema()` for action forms, and `recordActions()` / `toolbarActions()` on tables. Override `table(Table $table): Table` to customize the table. The available actions are `delete` (record and bulk), `create_folder`, and `upload_file` (header).
 
-    // actions names: open, download, delete
-    $table->getAction('delete')->hidden(true);
+If you previously set a disk name in a `$disk` property, use the `getDisk()` override above instead.
 
-    return $table;
-}
+## Testing
+
+```bash
+composer install
+composer test
 ```
 
-Adding addition action:
-```php
-public function table(Table $table): Table
-{
-    $table = parent::table($table);
-
-    $table->pushActions([
-        Action::make('john')
-            ->label('John'),
-    ]);
-
-    return $table;
-}
-```
+Tests use a fake filesystem and do not require OneDrive credentials.
 
 ## License
 
-The MIT License (MIT). Please see [License File](LICENSE.md) for more information.
+The MIT License (MIT). See [License File](LICENSE.md).

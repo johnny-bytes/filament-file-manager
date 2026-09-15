@@ -30,7 +30,7 @@ class FileItem extends Model
      */
     protected static Filesystem $diskInstance;
 
-    protected static string $path;
+    protected static string $listingPath;
 
     /**
      * Sushi requires a schema. Adjust as needed for your columns.
@@ -40,6 +40,7 @@ class FileItem extends Model
         'dateModified' => 'datetime',
         'size' => 'integer',
         'type' => 'string',
+        'path' => 'string',
     ];
 
 
@@ -49,7 +50,10 @@ class FileItem extends Model
     public static function queryForDiskAndPath(Filesystem $disk, string $path = ''): Builder
     {
         static::$diskInstance = $disk;
-        static::$path = $path;
+        static::$listingPath = $path;
+
+        // Rebuild the transient listing after navigation or filesystem changes.
+        unset(static::$booted[static::class]);
 
         // Return the Sushi model's query builder:
         return static::query();
@@ -121,7 +125,7 @@ class FileItem extends Model
     public function getRows(): array
     {
         $disk = static::$diskInstance;
-        $path = static::$path;
+        $path = static::$listingPath;
 
         // If there's a path (not the root), create a "go up" entry:
         $backPath = [];
