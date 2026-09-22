@@ -152,6 +152,7 @@ class FileManager extends Page implements HasTable
                         $this->getDisk()
                             ->makeDirectory($livewire->path.'/'.$data['name']);
 
+                        FileItem::forgetListing();
                         $this->resetTable();
                         $action->sendSuccessNotification();
                     }),
@@ -188,7 +189,10 @@ class FileManager extends Page implements HasTable
                             })
                             ->directory($this->path),
                     ])
-                    ->action(fn () => $this->resetTable()),
+                    ->action(function (): void {
+                        FileItem::forgetListing();
+                        $this->resetTable();
+                    }),
             ]);
     }
 }

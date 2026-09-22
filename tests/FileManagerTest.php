@@ -9,6 +9,7 @@ use Filament\Facades\Filament;
 use Filament\Panel;
 use Illuminate\Contracts\Filesystem\Filesystem;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Filesystem\FilesystemAdapter;
 use Illuminate\Support\Facades\Storage;
 use Livewire\Livewire;
 use Orchestra\Testbench\TestCase;
@@ -37,6 +38,12 @@ class FileManagerTest extends TestCase
 
         $disk->put('folder/child.txt', 'child');
         $disk->put('root.txt', 'root');
+
+        // The listing is reused while the disk and path are unchanged, so a write made
+        // behind the model's back has to drop it explicitly.
+        self::assertCount(0, FileItem::queryForDiskAndPath($disk)->get());
+        FileItem::forgetListing();
+
         self::assertSame(['folder', 'root.txt'], FileItem::queryForDiskAndPath($disk)->pluck('name')->all());
         $items = FileItem::queryForDiskAndPath($disk, 'folder')->get();
         self::assertSame(['..', 'child.txt'], $items->pluck('name')->all());
@@ -44,6 +51,28 @@ class FileManagerTest extends TestCase
         self::assertTrue($items->last()->delete());
         $disk->assertMissing('folder/child.txt');
         self::assertSame(['..'], FileItem::queryForDiskAndPath($disk, 'folder')->pluck('name')->all());
+    }
+
+    public function test_reuses_the_listing_until_the_path_changes(): void
+    {
+        $disk = Storage::disk('files');
+        $disk->put('root.txt', 'root');
+
+        $listings = 0;
+        $counting = new CountingDisk($disk->getDriver(), $disk->getAdapter(), $disk->getConfig());
+        CountingDisk::$listings = 0;
+
+        FileItem::queryForDiskAndPath($counting)->get();
+        FileItem::queryForDiskAndPath($counting)->get();
+        FileItem::queryForDiskAndPath($counting)->get();
+        self::assertSame(1, CountingDisk::$listings);
+
+        FileItem::queryForDiskAndPath($counting, 'folder')->get();
+        self::assertSame(2, CountingDisk::$listings);
+
+        FileItem::forgetListing();
+        FileItem::queryForDiskAndPath($counting, 'folder')->get();
+        self::assertSame(3, CountingDisk::$listings);
     }
 
     public function test_renders_the_page_and_creates_a_folder_with_filament_actions(): void
@@ -133,5 +162,17 @@ class TestPanelProvider extends \Filament\PanelProvider
     public function panel(Panel $panel): Panel
     {
         return $panel->id('admin')->path('admin')->default()->pages([TestFileManager::class]);
+    }
+}
+
+class CountingDisk extends FilesystemAdapter
+{
+    public static int $listings = 0;
+
+    public function listContents($directory = null, $recursive = false)
+    {
+        static::$listings++;
+
+        return parent::listContents($directory, $recursive);
     }
 }

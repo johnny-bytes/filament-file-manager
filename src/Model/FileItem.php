@@ -49,11 +49,16 @@ class FileItem extends Model
      */
     public static function queryForDiskAndPath(Filesystem $disk, string $path = ''): Builder
     {
+        $changed = ! isset(static::$listingPath)
+            || static::$listingPath !== $path
+            || (static::$diskInstance ?? null) !== $disk;
+
         static::$diskInstance = $disk;
         static::$listingPath = $path;
 
-        // Rebuild the transient listing after navigation or filesystem changes.
-        static::forgetListing();
+        if ($changed) {
+            static::forgetListing();
+        }
 
         // Return the Sushi model's query builder:
         return static::query();
@@ -61,6 +66,11 @@ class FileItem extends Model
 
     /**
      * Drops the transient listing so the next query re-reads the disk.
+     *
+     * The listing is reused for as long as the disk and path stay the same, because a
+     * consumer renders the table several times per request and each rebuild costs one
+     * remote listing. Anything that writes to the disk must call this, or the table will
+     * keep showing the listing from before the write.
      *
      * Sushi registers its connection setup through Model::whenBooted(), and Laravel keeps
      * those callbacks in $bootedCallbacks for the lifetime of the process. Clearing the
@@ -94,11 +104,15 @@ class FileItem extends Model
      */
     public function delete(): bool
     {
-        if ($this->isFolder() && ! $this->isPreviousPath()) {
-            return static::$diskInstance->deleteDirectory($this->path);
+        $deleted = $this->isFolder() && ! $this->isPreviousPath()
+            ? static::$diskInstance->deleteDirectory($this->path)
+            : static::$diskInstance->delete($this->path);
+
+        if ($deleted) {
+            static::forgetListing();
         }
 
-        return static::$diskInstance->delete($this->path);
+        return $deleted;
     }
 
     /**
