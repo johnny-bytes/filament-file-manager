@@ -53,10 +53,23 @@ class FileItem extends Model
         static::$listingPath = $path;
 
         // Rebuild the transient listing after navigation or filesystem changes.
-        unset(static::$booted[static::class]);
+        static::forgetListing();
 
         // Return the Sushi model's query builder:
         return static::query();
+    }
+
+    /**
+     * Drops the transient listing so the next query re-reads the disk.
+     *
+     * Sushi registers its connection setup through Model::whenBooted(), and Laravel keeps
+     * those callbacks in $bootedCallbacks for the lifetime of the process. Clearing the
+     * boot flag alone re-registers on every rebuild and replays every earlier
+     * registration, so each rebuild would re-read the disk once more than the last.
+     */
+    public static function forgetListing(): void
+    {
+        unset(static::$booted[static::class], static::$bootedCallbacks[static::class]);
     }
 
     /**
